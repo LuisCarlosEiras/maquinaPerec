@@ -4,7 +4,7 @@
 
 ---
 
-**A Máquina** é uma aplicação de análise textual que submete obras literárias a cinco protocolos de escrutínio computacional — da estatística bruta ao grafo ontológico gerado por inteligência artificial local. O projeto parte da peça radiofônica *La Machine* (1968), em que Perec alimenta um computador com *A Princesa de Clèves* e debate ao vivo com os resultados. Aqui, o leitor pode fazer o mesmo com qualquer texto.
+**A Máquina** é uma aplicação de análise textual, que submete obras literárias a seis protocolos de escrutínio computacional — da estatística bruta ao grafo ontológico - gerada por inteligência artificial local. O projeto parte da peça radiofônica *La Machine* (1968), em que Perec alimenta um computador com *A Princesa de Clèves* e debate ao vivo com os resultados. Aqui, o leitor pode fazer o mesmo com qualquer texto.
 
 ---
 
