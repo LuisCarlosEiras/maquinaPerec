@@ -388,168 +388,267 @@ def protocolo_quatro(texto):
 
 # ── PROTOCOLO 5 — Grafo Ontológico ───────────────────────────────────────────
 
-def extrair_grafo_ontologico_llm(texto, max_nos=40):
+# ── modelos Ollama disponíveis (ordem de preferência) ────────────────────────
+OLLAMA_MODELOS_PREFERENCIA = [
+    "qwen2.5:3b",
+    "qwen2.5:1.5b",
+    "llama3.2:3b",
+    "llama3.1:8b",
+    "mistral:7b",
+    "phi3:mini",
+]
+
+@st.cache_resource(show_spinner=False)
+def _detectar_modelo_ollama():
     """
-    Extrai ontologia semântica via API Claude.
-    Identifica personagens, temas, conceitos narrativos, espaços, recursos
-    literários — como no grafoOllama — em vez de palavras frequentes brutas.
-    Retorna (nos_dict, arestas) no mesmo formato esperado pelo gerar_html_grafo.
+    Detecta modelos Ollama disponíveis localmente e retorna o melhor disponível.
+    Usa a API REST do Ollama (http://localhost:11434).
+    Resultado fica em cache na sessão — não re-detecta a cada run.
     """
     import urllib.request
     import urllib.error
 
-    # trunca texto para não explodir tokens
-    trecho = texto[:6000] if len(texto) > 6000 else texto
+    try:
+        req = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
+        data = json.loads(req.read().decode())
+        instalados = {m["name"].split(":")[0] + ":" + m["name"].split(":")[1]
+                      if ":" in m["name"] else m["name"] + ":latest"
+                      for m in data.get("models", [])}
+        # também aceita nomes sem tag
+        instalados_base = {m.split(":")[0] for m in instalados}
 
-    PROMPT_NOS = f"""Você é um analista literário especializado em ontologias textuais.
+        for pref in OLLAMA_MODELOS_PREFERENCIA:
+            base = pref.split(":")[0]
+            if pref in instalados or base in instalados_base:
+                # retorna o nome exato instalado
+                for ins in instalados:
+                    if ins.startswith(base + ":"):
+                        return ins
+                return pref
+        # nenhum preferido encontrado — retorna o primeiro disponível
+        if instalados:
+            return next(iter(instalados))
+        raise RuntimeError("Nenhum modelo encontrado no Ollama.")
+    except urllib.error.URLError:
+        raise RuntimeError("Ollama não está rodando. Inicie com: ollama serve")
 
-Leia o texto abaixo e extraia uma ontologia com {max_nos} nós semanticamente ricos.
-NÃO extraia palavras frequentes genéricas ("anos", "dias", "grande", "amigo").
-Extraia CONCEITOS SIGNIFICATIVOS: personagens nomeados, temas centrais, espaços narrativos,
-recursos literários, referências culturais/míticas, estados emocionais importantes, conflitos.
 
-Categorias disponíveis:
-- "entidade": personagem, lugar, obra, autor, ser, objeto central
-- "conceito": tema abstrato, ideia filosófica, força narrativa
-- "qualidade": atributo marcante, estado emocional dominante
-- "ação": processo narrativo central, verbo-força do texto
-- "relação": vínculo entre elementos (traição, memória, eco, símbolo)
+def _inferir_ollama(modelo, prompt, system=None, temperatura=0.3):
+    """
+    Chama a API REST do Ollama e retorna o texto gerado.
+    Usa /api/chat com formato de mensagens.
+    """
+    import urllib.request
 
-Responda APENAS com JSON válido, sem markdown, sem explicação:
-{{
-  "nos": [
-    {{"id": "Nome Do Conceito", "categoria": "entidade", "peso": 5, "descricao": "breve nota"}},
-    ...
-  ]
-}}
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.append({"role": "user", "content": prompt})
 
-Regras:
-- id com capitalização natural (ex: "Mitologia Grega", "Teatro", "Profecia Ignorada")
-- peso entre 1 e 10 (importância no texto)
-- mínimo 15 nós, máximo {max_nos}
-- proibido repetir conceitos sinônimos
+    payload = json.dumps({
+        "model": modelo,
+        "messages": msgs,
+        "stream": False,
+        "options": {
+            "temperature": temperatura,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "num_predict": 1024,
+            "num_ctx": 2048,
+        }
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "http://localhost:11434/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    resp = urllib.request.urlopen(req, timeout=300)
+    data = json.loads(resp.read().decode())
+    return data["message"]["content"].strip()
+
+
+def extrair_grafo_ontologico_llm(texto, max_nos=40):
+    """
+    Extrai ontologia via Ollama (LLM local quantizado — rápido em CPU e GPU).
+    Estratégia em 2 passos:
+      1) Análise literária livre em prosa — o modelo raciocina sem schema
+      2) Conversão da análise em JSON estruturado
+    Requer: ollama serve  +  ollama pull qwen2.5:3b  (ou outro modelo suportado)
+    """
+    import json as _json
+
+    modelo = _detectar_modelo_ollama()
+
+    trecho = texto[:2000] if len(texto) > 2000 else texto
+
+    # blacklist dinâmica: palavras mais frequentes sem valor estrutural
+    tokens_bl = re.findall(r'\b[a-záéíóúâêîôûãõàèìòùç]{3,}\b', texto.lower())
+    sw_bl = {
+        'que','com','uma','por','não','ele','ela','seu','sua','mas','como',
+        'mais','para','dos','das','nos','nas','era','ser','ter','foi','são',
+        'está','isso','esse','essa','este','esta','quando','porque','nunca',
+        'sempre','depois','antes','ainda','sobre','muito','mesmo','outro',
+        'todos','cada','entre','aqui','onde','quem','qual','pela','pelo',
+        'desde','além','junto','contra','dentro','fora','nada','tudo','modo',
+        'forma','tipo','caso','lado','parte','tempo','vezes','então','assim',
+        'logo','tanto','agora','hoje','havia','podia','fazer','quase','algum',
+        'alguns','algumas','houve','tinha','foram','estar','sendo','feito',
+        'disse','dizia','fazia','ficou','ficam','ficava','seria','teriam',
+    }
+    freq_bl = Counter(p for p in tokens_bl if p not in sw_bl and len(p) > 3)
+    blacklist_str = ", ".join(f'"{p}"' for p, _ in freq_bl.most_common(20))
+
+    SYSTEM = "Você é um analista literário especializado em ontologias narrativas. Responda APENAS com JSON válido, sem markdown, sem texto adicional."
+
+    # ── PASSO 1: análise literária livre ─────────────────────────────────────
+    PROMPT_ANALISE = f"""Liste em poucas frases os principais elementos do texto:
+- Entidades (personagens, lugares, objetos)
+- Temas centrais (abstratos, não palavras comuns)
+- Emoções/qualidades dominantes
+- Ações narrativas importantes
+- Como eles se relacionam
+
+EVITE estas palavras: {blacklist_str}
+Liste 10 a 20 elementos. Seja conciso.
 
 TEXTO:
 {trecho}"""
 
-    PROMPT_ARESTAS = ""  # será construído após nós
+    analise = _inferir_ollama(modelo, PROMPT_ANALISE, temperatura=0.3)
 
-    def chamar_api(prompt):
-        import urllib.request, urllib.error, json as _json
-        dados = _json.dumps({
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}]
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=dados,
-            headers={
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST"
-        )
+    if not analise.strip():
+        raise RuntimeError("Modelo não retornou análise.")
+
+    # ── PASSO 2: converte análise em JSON ─────────────────────────────────────
+    PROMPT_JSON = f"""Com base na análise literária abaixo, produza um JSON para um grafo ontológico.
+
+ANÁLISE:
+{analise[:1200]}
+
+CATEGORIAS PERMITIDAS:
+- "entidade": personagem nomeado, lugar, obra, objeto simbólico
+- "conceito": tema abstrato (Memória, Profecia, Metalinguagem, Resistência)
+- "qualidade": emoção ou atributo dominante (Solidão, Angústia, Êxtase)
+- "ação": processo narrativo como substantivo (Fuga, Criação, Ruptura, Busca)
+- "relação": vínculo estrutural (Traição, Herança, Eco, Espelhamento)
+
+REGRAS OBRIGATÓRIAS:
+- IDs em Title Case: "Memória e Repetição", "Teatro", "Hans Magnus"
+- peso 1–10 (10=núcleo protagonista, 1=periférico)
+- label das arestas: verbos específicos ao texto (PROIBIDO: "relaciona", "está", "co-ocorre")
+- todo nó deve aparecer em pelo menos uma aresta
+- entre 15 e {max_nos} nós; entre 20 e 45 arestas
+
+Responda SOMENTE com JSON válido, sem markdown, sem texto antes ou depois:
+{{"nos":[{{"id":"Nome","categoria":"conceito","peso":7,"descricao":"papel no texto"}}],"arestas":[{{"source":"Nome A","target":"Nome B","label":"verbo","weight":4}}]}}"""
+
+    raw = _inferir_ollama(modelo, PROMPT_JSON, system=SYSTEM, temperatura=0.1)
+
+    # ── limpeza e parsing multi-estratégia ──────────────────────────────────
+    raw = raw.strip()
+    # remove markdown fences
+    if "```" in raw:
+        raw = re.sub(r"```[a-z]*\n?", "", raw).strip().rstrip("`").strip()
+
+    dados = None
+    nos_raw = []
+    arestas_raw = []
+
+    # estratégia 1: objeto {"nos":[], "arestas":[]}
+    m = re.search(r'\{[\s\S]*\}', raw)
+    if m:
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                return _json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"API HTTP {e.code}: {body[:300]}")
+            dados = _json.loads(m.group(0))
+            nos_raw     = dados.get("nos", dados.get("nós", dados.get("nodes", [])))
+            arestas_raw = dados.get("arestas", dados.get("edges", dados.get("links", [])))
+        except Exception:
+            dados = None
 
-    # ── Fase 1: extrai nós ────────────────────────────────────────────────────
-    resp1 = chamar_api(PROMPT_NOS)
-    raw1 = ""
-    for bloco in resp1.get("content", []):
-        if bloco.get("type") == "text":
-            raw1 += bloco["text"]
+    # estratégia 2: o modelo devolveu lista plana de objetos (nós e arestas misturados)
+    if not nos_raw:
+        m2 = re.search(r'\[[\s\S]*\]', raw)
+        if m2:
+            try:
+                lista = _json.loads(m2.group(0))
+                for item in lista:
+                    if isinstance(item, dict):
+                        if "source" in item or "target" in item:
+                            arestas_raw.append(item)
+                        elif "id" in item:
+                            nos_raw.append(item)
+            except Exception:
+                pass
 
-    # limpa possível markdown
-    raw1 = raw1.strip()
-    if raw1.startswith("```"):
-        raw1 = re.sub(r"```[a-z]*\n?", "", raw1).strip().rstrip("`").strip()
-
-    try:
-        dados_nos = json.loads(raw1)
-        nos_raw = dados_nos.get("nos", dados_nos.get("nós", []))
-    except Exception as e:
-        raise RuntimeError(f"JSON de nós inválido: {e}\nResposta: {raw1[:400]}")
+    # estratégia 3: múltiplos objetos JSON separados (NDJSON-like)
+    if not nos_raw:
+        objetos = re.findall(r'\{[^{}]+\}', raw)
+        for obj_str in objetos:
+            try:
+                item = _json.loads(obj_str)
+                if "source" in item or "target" in item:
+                    arestas_raw.append(item)
+                elif "id" in item:
+                    nos_raw.append(item)
+            except Exception:
+                pass
 
     if not nos_raw:
-        raise RuntimeError("LLM não retornou nós.")
+        raise RuntimeError(f"Nenhum nó parseável. Resposta do modelo:\n{raw[:500]}")
 
-    # normaliza nós
+    # ── normaliza nós ─────────────────────────────────────────────────────────
     nos_dict = {}
     for n in nos_raw[:max_nos]:
         nid = str(n.get("id", "")).strip()
         if not nid:
             continue
         cat = n.get("categoria", "conceito")
-        if cat not in ("entidade", "conceito", "qualidade", "ação", "relação"):
+        if cat not in ("entidade","conceito","qualidade","ação","relação"):
             cat = "conceito"
-        peso = max(1, min(10, int(n.get("peso", 3))))
-        nos_dict[nid] = {"categoria": cat, "peso": peso,
-                         "descricao": n.get("descricao", "")}
+        nos_dict[nid] = {
+            "categoria": cat,
+            "peso": max(1, min(10, int(n.get("peso", 3)))),
+            "descricao": n.get("descricao", ""),
+        }
 
-    # ── Fase 2: extrai arestas ────────────────────────────────────────────────
-    ids_lista = "\n".join(f'- "{k}"' for k in list(nos_dict.keys())[:35])
-    PROMPT_ARESTAS = f"""Você recebeu a lista de nós de uma ontologia literária.
-Crie as arestas (relações) entre eles com base no texto fornecido.
+    nos_set   = set(nos_dict.keys())
+    nos_lower = {k.lower(): k for k in nos_set}
 
-NÓS DISPONÍVEIS:
-{ids_lista}
+    def resolver(s):
+        s = str(s).strip()
+        if s in nos_set: return s
+        sl = s.lower()
+        if sl in nos_lower: return nos_lower[sl]
+        for k, kc in nos_lower.items():
+            if sl in k or k in sl: return kc
+        return None
 
-TEXTO (trecho):
-{trecho[:3000]}
-
-Responda APENAS com JSON válido:
-{{
-  "arestas": [
-    {{"source": "Nó A", "target": "Nó B", "label": "verbo da relação", "weight": 3}},
-    ...
-  ]
-}}
-
-Regras:
-- source e target devem ser IDs EXATOS da lista acima
-- label: verbo curto em português (ex: "habita", "provoca", "simboliza", "dialoga com", "nega")
-- weight: 1 a 8 (intensidade da relação)
-- gere entre 20 e 50 arestas
-- evite duplicatas (A→B e B→A com mesmo label)"""
-
-    resp2 = chamar_api(PROMPT_ARESTAS)
-    raw2 = ""
-    for bloco in resp2.get("content", []):
-        if bloco.get("type") == "text":
-            raw2 += bloco["text"]
-
-    raw2 = raw2.strip()
-    if raw2.startswith("```"):
-        raw2 = re.sub(r"```[a-z]*\n?", "", raw2).strip().rstrip("`").strip()
-
-    try:
-        dados_arestas = json.loads(raw2)
-        arestas_raw = dados_arestas.get("arestas", [])
-    except Exception:
-        arestas_raw = []
-
-    # valida arestas (source e target devem existir)
-    nos_set = set(nos_dict.keys())
-    arestas = []
-    vistos = set()
+    # ── normaliza arestas ─────────────────────────────────────────────────────
+    arestas, vistos = [], set()
     for a in arestas_raw:
-        src = str(a.get("source", "")).strip()
-        tgt = str(a.get("target", "")).strip()
-        lbl = str(a.get("label", "relaciona")).strip()[:30]
-        w = max(1, min(8, int(a.get("weight", 2))))
-        if src in nos_set and tgt in nos_set and src != tgt:
-            chave = tuple(sorted([src, tgt]) + [lbl])
-            if chave not in vistos:
-                vistos.add(chave)
-                arestas.append({"source": src, "target": tgt,
-                                "label": lbl, "weight": w})
+        src = resolver(a.get("source",""))
+        tgt = resolver(a.get("target",""))
+        lbl = str(a.get("label","relaciona")).strip()[:35]
+        w   = max(1, min(8, int(a.get("weight", 2))))
+        if src and tgt and src != tgt:
+            ch = (min(src,tgt), max(src,tgt), lbl)
+            if ch not in vistos:
+                vistos.add(ch)
+                arestas.append({"source":src,"target":tgt,"label":lbl,"weight":w})
+
+    # ── conecta nós isolados ──────────────────────────────────────────────────
+    conectados = {a["source"] for a in arestas} | {a["target"] for a in arestas}
+    ancora = max(nos_dict, key=lambda k: nos_dict[k]["peso"])
+    for nid in nos_set:
+        if nid not in conectados and nid != ancora:
+            mesmo_tipo = [k for k, v in nos_dict.items()
+                          if k in conectados and v["categoria"] == nos_dict[nid]["categoria"] and k != nid]
+            alvo = max(mesmo_tipo, key=lambda k: nos_dict[k]["peso"]) if mesmo_tipo else ancora
+            arestas.append({"source":nid,"target":alvo,"label":"integra","weight":1})
 
     return nos_dict, arestas
+
 
 
 def extrair_grafo_ontologico_fallback(texto, max_nos=40):
@@ -636,13 +735,13 @@ def extrair_grafo_ontologico_fallback(texto, max_nos=40):
 
 def extrair_grafo_ontologico(texto, max_nos=40, usar_llm=True):
     """
-    Wrapper: tenta extração LLM; cai no fallback se falhar.
+    Wrapper: tenta extração via LLM local; cai no fallback estatístico se falhar.
     Retorna (nos_dict, arestas, metodo_usado).
     """
     if usar_llm:
         try:
             nos, arestas = extrair_grafo_ontologico_llm(texto, max_nos)
-            return nos, arestas, "llm"
+            return nos, arestas, "local"
         except Exception as e:
             return *extrair_grafo_ontologico_fallback(texto, max_nos), f"fallback ({e})"
     else:
@@ -863,35 +962,61 @@ ARESTAS_DATA.forEach(a => {{
   }}
 }});
 
-// física
-const K_REP = 10000, K_ATR = 0.010, DIST = 130, DAMP = 0.72, VMAX = 10;
+// física — repulsão moderada, atração forte, clustering por categoria
+const K_REP  = 3500;   // repulsão (era 10000 — expulsava entidades para fora)
+const K_ATR  = 0.06;   // atração por aresta (era 0.010 — fraca demais)
+const K_CAT  = 0.005;  // atração suave entre nós da mesma categoria
+const DIST   = 100;    // distância-alvo das arestas
+const DAMP   = 0.80;
+const VMAX   = 6;
 
 function simular() {{
   if (frozen) return;
+
+  // repulsão par-a-par
   for (let i = 0; i < nos.length; i++) {{
-    nos[i].vx *= DAMP; nos[i].vy *= DAMP;
+    nos[i].vx *= DAMP;
+    nos[i].vy *= DAMP;
     for (let j = i+1; j < nos.length; j++) {{
       const dx = nos[i].x - nos[j].x, dy = nos[i].y - nos[j].y;
-      const d2 = dx*dx + dy*dy + 0.5;
-      const d = Math.sqrt(d2);
-      const f = K_REP / d2;
+      const d2 = dx*dx + dy*dy + 1;
+      const d  = Math.sqrt(d2);
+      const f  = K_REP / d2;
       nos[i].vx += f*dx/d; nos[i].vy += f*dy/d;
       nos[j].vx -= f*dx/d; nos[j].vy -= f*dy/d;
     }}
-    // gravidade central suave
-    nos[i].vx -= nos[i].x * 0.0008;
-    nos[i].vy -= nos[i].y * 0.0008;
+    // gravidade central — mais forte para nós leves/periféricos
+    const gf = 0.0008 + 0.004 / (nos[i].peso || 1);
+    nos[i].vx -= nos[i].x * gf;
+    nos[i].vy -= nos[i].y * gf;
   }}
+
+  // atração por arestas — escala com weight
   ARESTAS_DATA.forEach(a => {{
     const si = nosIdx[a.source], ti = nosIdx[a.target];
     if (si===undefined||ti===undefined) return;
     const s=nos[si], t=nos[ti];
     const dx=t.x-s.x, dy=t.y-s.y;
     const d=Math.sqrt(dx*dx+dy*dy)+0.01;
-    const f=K_ATR*(d-DIST);
+    const f=K_ATR*(d-DIST)*(0.6 + a.weight*0.08);
     s.vx+=f*dx/d; s.vy+=f*dy/d;
     t.vx-=f*dx/d; t.vy-=f*dy/d;
   }});
+
+  // clustering suave por categoria
+  for (let i = 0; i < nos.length; i++) {{
+    for (let j = i+1; j < nos.length; j++) {{
+      if (nos[i].categoria !== nos[j].categoria) continue;
+      const dx=nos[j].x-nos[i].x, dy=nos[j].y-nos[i].y;
+      const d=Math.sqrt(dx*dx+dy*dy)+0.01;
+      if (d > 300) continue;
+      const f=K_CAT*(1 - 200/d);
+      nos[i].vx+=f*dx/d; nos[i].vy+=f*dy/d;
+      nos[j].vx-=f*dx/d; nos[j].vy-=f*dy/d;
+    }}
+  }}
+
+  // integração
   nos.forEach(n => {{
     if (n.fx!==null) {{ n.x=n.fx; n.y=n.fy; return; }}
     const sp=Math.sqrt(n.vx*n.vx+n.vy*n.vy);
@@ -899,7 +1024,7 @@ function simular() {{
     n.x+=n.vx; n.y+=n.vy;
   }});
   PARTICLES.forEach(p => {{
-    p.x += p.vx; p.y += p.vy;
+    p.x+=p.vx; p.y+=p.vy;
     if (Math.abs(p.x)>1200) p.vx*=-1;
     if (Math.abs(p.y)>1200) p.vy*=-1;
   }});
@@ -1121,6 +1246,12 @@ function closePanel() {{
 }}
 
 // INTERAÇÕES
+// TOOLTIP no hover
+const tooltip = document.createElement('div');
+tooltip.id = 'graph-tooltip';
+tooltip.style.cssText = 'position:fixed;background:#1a1a1a;border:1px solid #444;border-left:3px solid #4aa8e8;padding:8px 12px;font-family:monospace;font-size:0.75rem;color:#ccc;pointer-events:none;display:none;z-index:9999;max-width:220px;line-height:1.5';
+document.body.appendChild(tooltip);
+
 canvas.addEventListener('mousemove', e => {{
   const rect=canvas.getBoundingClientRect();
   const mx=e.clientX-rect.left, my=e.clientY-rect.top;
@@ -1135,10 +1266,22 @@ canvas.addEventListener('mousemove', e => {{
     for (const n of nos) {{
       const dx=n.x-wx, dy=n.y-wy;
       if (Math.sqrt(dx*dx+dy*dy) < n.raio+3/scale) {{
-        hoveredNode=n; canvas.style.cursor='pointer'; break;
+        hoveredNode=n; canvas.style.cursor='pointer';
+        // mostrar tooltip
+        const tt=document.getElementById('graph-tooltip');
+        tt.innerHTML = '<strong style="color:#e8e8e8">' + n.label + '</strong><br>'
+          + '<span style="color:#666;font-size:0.7rem">' + n.categoria.toUpperCase() + ' · peso ' + n.peso + '</span>'
+          + (n.descricao ? '<br><span style="color:#aaa;font-style:italic">' + n.descricao + '</span>' : '');
+        tt.style.display='block';
+        tt.style.left=(e.clientX+14)+'px';
+        tt.style.top=(e.clientY-10)+'px';
+        break;
       }}
     }}
-    if (!hoveredNode) canvas.style.cursor='grab';
+    if (!hoveredNode) {{
+      canvas.style.cursor='grab';
+      document.getElementById('graph-tooltip').style.display='none';
+    }}
   }}
   lastMX=mx; lastMY=my;
 }});
@@ -1283,6 +1426,15 @@ div[data-testid="stSidebarContent"] { background-color: #0d0d0d; }
 .ancora-sub { font-size: 0.65rem; color: #444; letter-spacing: 0.2em; text-align: center; }
 .blink { animation: blink 1s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }
+/* esconder header branco do Streamlit */
+header[data-testid="stHeader"] { display: none !important; }
+#MainMenu { display: none !important; }
+footer { display: none !important; }
+.block-container { padding-top: 1rem !important; }
+/* estilizar uploader */
+[data-testid="stFileUploader"] section { background: #111; border: 1px dashed #444; border-radius: 4px; }
+[data-testid="stFileUploader"] section:hover { border-color: #888; }
+[data-testid="stFileUploader"] section p { color: #666 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1337,6 +1489,20 @@ st.markdown("<div style='border-top:1px solid #2a2a2a;margin:0.5rem 0 1.5rem 0'>
 texto_bruto = None
 
 if fonte == "📂 Upload de arquivo":
+    st.markdown(
+        "<style>"
+        "[data-testid='stFileUploaderDropzoneInstructions'] div span:first-child"
+        " { display:none; }"
+        "[data-testid='stFileUploaderDropzoneInstructions']::before"
+        " { content:'Arraste e solte o arquivo aqui'; color:#666; font-family:inherit; font-size:0.9rem; }"
+        "[data-testid='stFileUploaderDropzoneInstructions'] div small"
+        " { display:none; }"
+        "[data-testid='stFileUploaderDropzoneInstructions']::after"
+        " { content:'Limite 200MB · PDF, DOCX, DOC, TXT'; color:#444; font-size:0.75rem; display:block; margin-top:4px; }"
+        "[data-testid='stBaseButton-secondary'] { color:#888 !important; border-color:#444 !important; }"
+        "[data-testid='stBaseButton-secondary']::after { content:'Procurar arquivo'; }"
+        "[data-testid='stBaseButton-secondary'] p { display:none; }"
+        "</style>", unsafe_allow_html=True)
     arq = st.file_uploader("INSERIR ARQUIVO", type=["pdf","docx","doc","txt"], label_visibility="collapsed")
     if arq:
         with st.spinner("lendo arquivo..."):
@@ -1613,32 +1779,38 @@ with tabs[5]:
         # ── controles de extração ─────────────────────────────────────────────
         col_llm, col_info = st.columns([1, 2])
         with col_llm:
-            usar_llm = st.toggle("🧠 Extração semântica (Claude API)", value=True,
-                help="Usa Claude para identificar personagens, temas e conceitos narrativos reais. "
-                     "Desative para usar extração estatística local (sem API).")
+            usar_llm = st.toggle("🧠 Extração semântica (Ollama)", value=True,
+                help="Usa modelo LLM local via Ollama para identificar personagens, temas e conceitos "
+                     "narrativos reais. Requer: ollama serve + ollama pull qwen2.5:3b. "
+                     "Desative para usar extração estatística (rápida, sem modelo).")
         with col_info:
             if usar_llm:
+                try:
+                    modelo_det = _detectar_modelo_ollama()
+                    info_modelo = f"<span style='color:#4ecb6e'>{modelo_det}</span> · via Ollama"
+                except Exception as e:
+                    info_modelo = f"<span style='color:#f07040'>Ollama indisponível</span> · {str(e)[:60]}"
                 st.markdown(
-                    "<div class='terminal-box' style='padding:0.4rem 0.8rem;font-size:0.75rem'>"
-                    "modo: <span style='color:#4aa8e8'>semântico</span> · "
-                    "extrai personagens, temas, espaços e recursos literários via LLM"
-                    "</div>", unsafe_allow_html=True)
+                    f"<div class='terminal-box' style='padding:0.4rem 0.8rem;font-size:0.75rem'>"
+                    f"modo: <span style='color:#4aa8e8'>semântico local</span> · "
+                    f"{info_modelo}"
+                    f"</div>", unsafe_allow_html=True)
             else:
                 st.markdown(
                     "<div class='terminal-box' style='padding:0.4rem 0.8rem;font-size:0.75rem'>"
                     "modo: <span style='color:#f0c040'>estatístico</span> · "
-                    "usa frequência e heurísticas locais (qualidade reduzida)"
+                    "frequência e heurísticas locais (qualidade reduzida, sem modelo)"
                     "</div>", unsafe_allow_html=True)
 
         # chave de cache: muda se o texto ou o modo mudar
-        cache_key = f"grafo_{hash(texto_bruto[:500])}_{usar_llm}_{max_nos}"
+        cache_key = f"grafo_v6_{hash(texto_bruto[:500])}_{usar_llm}_{max_nos}"
 
         if st.button("⟳ Regenerar grafo", key="btn_regen"):
             if cache_key in st.session_state:
                 del st.session_state[cache_key]
 
         if cache_key not in st.session_state:
-            with st.spinner("extraindo ontologia" + (" via Claude API…" if usar_llm else " (modo local)…")):
+            with st.spinner("extraindo ontologia" + (" via LLM local…" if usar_llm else " (modo estatístico)…")):
                 nos_dict, arestas, metodo = extrair_grafo_ontologico(
                     texto_bruto, max_nos=max_nos, usar_llm=usar_llm)
             st.session_state[cache_key] = (nos_dict, arestas, metodo)
@@ -1650,13 +1822,13 @@ with tabs[5]:
             erro_msg = metodo.replace("fallback (", "").rstrip(")")
             st.markdown(
                 f"<div class='terminal-box' style='border-left-color:#f07040;font-size:0.75rem'>"
-                f"<span style='color:#f07040'>⚠ API indisponível</span> — usando extração local. "
+                f"<span style='color:#f07040'>⚠ LLM local indisponível</span> — usando extração estatística. "
                 f"<span style='color:#444'>({erro_msg})</span>"
                 f"</div>", unsafe_allow_html=True)
         else:
             st.markdown(
                 "<div class='terminal-box' style='border-left-color:#4ecb6e;font-size:0.75rem'>"
-                "<span style='color:#4ecb6e'>✓ ontologia extraída via Claude API</span>"
+                "<span style='color:#4ecb6e'>✓ ontologia extraída via Ollama</span>"
                 "</div>", unsafe_allow_html=True)
 
         # estatísticas do grafo
