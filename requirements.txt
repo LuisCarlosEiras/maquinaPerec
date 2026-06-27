@@ -1,0 +1,6 @@
+# A Máquina — requisitos Python
+# Instale com: pip install -r requirements.txt
+
+streamlit>=1.35.0
+PyPDF2>=3.0.0
+python-docx>=1.1.0
