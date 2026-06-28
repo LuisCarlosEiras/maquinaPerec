@@ -1,10 +1,10 @@
 # ⚙️ A Máquina
 ### Sistema de análise literária computacional
-*inspirado em Georges Perec · La Machine, 1968*
+*inspirado em Georges Perec · A Máquina, 1968*
 
 ---
 
-**A Máquina** é uma aplicação de análise textual, que submete obras literárias a seis protocolos de escrutínio computacional — da estatística bruta ao grafo ontológico - gerada por inteligência artificial local. O projeto parte da peça radiofônica *La Machine* (1968), em que Perec alimenta um computador com *A Princesa de Clèves* e debate ao vivo com os resultados. Aqui, o leitor pode fazer o mesmo com qualquer texto.
+**A Máquina** é uma aplicação de análise textual, que submete obras literárias a seis protocolos de escrutínio computacional — da estatística bruta ao grafo ontológico - gerada por inteligência artificial local. O projeto parte da peça radiofônica *A Máquina* (1968), em que Perec alimenta um computador com *Canção Noturna do Andarilho II*, de Goethe, e debate ao vivo com os resultados. Aqui, o leitor pode fazer o mesmo com qualquer texto.
 
 ---
 
