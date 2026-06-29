@@ -1,6 +1,6 @@
-# ⚙️ A Máquina
+# ⚙️ A Máquina, modo de usar
 ### Sistema de análise literária computacional
-*inspirado em Georges Perec · A Máquina, 1968*
+*Baseado na peça radiofônica **A Máquina**, de Georges Perec, 1968*
 
 ---
 
