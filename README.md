@@ -126,8 +126,8 @@ a-maquina-perec/
 
 ## Referências
 
->A peça radiofônica de 1968 original em alemão: https://www.youtube.com/watch?v=pu6TACgAdTI&t=1033s
->O texto da peça em inglês: https://monoskop.org/images/6/62/Perec_Georges_The_Machine.pdf
+A peça radiofônica de 1968 original em alemão: https://www.youtube.com/watch?v=pu6TACgAdTI&t=1033s
+O texto da peça em inglês: https://monoskop.org/images/6/62/Perec_Georges_The_Machine.pdf
 
 
 
