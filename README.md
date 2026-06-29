@@ -124,11 +124,12 @@ a-maquina-perec/
 
 ---
 
-## Referência
+## Referências
 
-> PEREC, Georges. *La Machine à analyser les romans*.  
-> Émission radiophonique, ORTF, 1968.  
-> Republicado em: *L'Arc*, nº 76, 1979.
+>A peça radiofônica de 1968 original em alemão: https://www.youtube.com/watch?v=pu6TACgAdTI&t=1033s
+>O texto da peça em inglês: https://monoskop.org/images/6/62/Perec_Georges_The_Machine.pdf
+
+
 
 ---
 
