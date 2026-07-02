@@ -131,7 +131,9 @@ A peça radiofônica de 1968 original em alemão: https://www.youtube.com/watch?
 O texto da peça em inglês: https://monoskop.org/images/6/62/Perec_Georges_The_Machine.pdf
 
 Sobre a peça e este programa: 
+
 https://medium.com/p/0cdaf56202ed
+
 https://diariodeminas.com.br/a-maquina-o-computador-radiofonico-desmontava-poemas-em-1968/
 
 
