@@ -614,8 +614,14 @@ const NOS_DATA={nos_json};
 const ARESTAS_DATA={arestas_json};
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
-let W,H;
-function resize(){{W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}}
+let W,H,DPR=1;
+function resize(){{
+  DPR=window.devicePixelRatio||1;
+  W=window.innerWidth;H=window.innerHeight;
+  canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}}
 resize();window.addEventListener('resize',resize);
 let offsetX=0,offsetY=0,scale=1;
 let showLabels=true,showEdges=true,frozen=false;
@@ -697,11 +703,13 @@ function desenharAresta(a){{
   ctx.lineTo(x1-ax*aw+px*ah,y1-ay*aw+py*ah);
   ctx.lineTo(x1-ax*aw-px*ah,y1-ay*aw-py*ah);
   ctx.closePath();ctx.fill();
-  // label da aresta
-  if(showEdges&&scale>0.55&&(hov||sel)){{
+  // label da aresta — sempre visível (não depende mais de hover/seleção)
+  if(showEdges&&scale>0.3){{
     const mx=(x0+x1)/2,my=(y0+y1)/2;
     ctx.font=`${{Math.max(8,9*scale)}}px 'Courier New'`;
-    ctx.fillStyle='#2a4060';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillStyle=hov||sel?'#4aa8e8':'#2a4060';
+    ctx.globalAlpha=dim?0.12:1;
+    ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.fillText(a.label,mx,my-8*scale);
   }}
   ctx.restore();
@@ -727,8 +735,7 @@ function desenharNo(n){{
     ctx.textAlign='center';ctx.textBaseline='middle';
     ctx.fillStyle=isSelected||isHovered?'#ffffff':n.textColor;
     ctx.shadowBlur=6;ctx.shadowColor='#000';
-    const label=n.label.length>13?n.label.slice(0,12)+'…':n.label;
-    ctx.fillText(label,x,y);ctx.shadowBlur=0;
+    ctx.fillText(n.label,x,y);ctx.shadowBlur=0;
     if(scale>0.65){{
       ctx.font=`${{Math.max(7,8*scale)}}px 'Courier New'`;
       ctx.fillStyle=n.stroke;ctx.globalAlpha=dimmed?0.15:0.6;
