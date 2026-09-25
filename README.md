@@ -137,6 +137,8 @@ https://medium.com/p/0cdaf56202ed
 
 https://diariodeminas.com.br/a-maquina-o-computador-radiofonico-desmontava-poemas-em-1968/
 
+![exemplo](exemplo.png)
+
 
 
 ---
